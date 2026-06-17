@@ -25,12 +25,22 @@ enum class NetworkState {
     DISCONNECTED, HOSTING, JOINING, CONNECTED, ERROR
 }
 
+enum class ConnectionType {
+    WIFI, BLUETOOTH
+}
+
+data class BtDevice(
+    val name: String,
+    val address: String
+)
+
 data class LaserTagState(
     val userHp: Int = 100,
     val opponentHp: Int = 100,
     val lockedZone: HitZone = HitZone.NONE,
     val liveColor: RoiColorData = RoiColorData(0, 0, 0, 0f, 0f, 0f),
     val networkState: NetworkState = NetworkState.DISCONNECTED,
+    val connectionType: ConnectionType = ConnectionType.WIFI,
     val isHost: Boolean = false,
     val localIp: String = "Unknown",
     val statusMessage: String = "Ready for combat. Calibrate colors first!",
@@ -42,7 +52,12 @@ data class LaserTagState(
     val limbsHsv: FloatArray = floatArrayOf(240f, 0.85f, 0.85f), // Blue default
     
     // UI selections
-    val currentCalibrationTab: HitZone = HitZone.HEAD
+    val currentCalibrationTab: HitZone = HitZone.HEAD,
+    val showLobby: Boolean = true,
+    
+    // Bluetooth discovery list
+    val bluetoothDevices: List<BtDevice> = emptyList(),
+    val isScanningBluetooth: Boolean = false
 )
 
 class LaserTagViewModel : ViewModel() {
@@ -56,8 +71,134 @@ class LaserTagViewModel : ViewModel() {
     private var printWriter: PrintWriter? = null
     private var readerThreadJob: kotlinx.coroutines.Job? = null
 
+    // Bluetooth Sockets
+    private var bluetoothServerSocket: android.bluetooth.BluetoothServerSocket? = null
+    private var bluetoothSocket: android.bluetooth.BluetoothSocket? = null
+    private var activeOutputStream: java.io.OutputStream? = null
+
+    private val MY_UUID = java.util.UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+
+    @Volatile
+    private var isPlayingAudio = false
+
     init {
         fetchLocalIp()
+    }
+
+    fun selectConnectionType(type: ConnectionType) {
+        _state.update { it.copy(connectionType = type) }
+    }
+
+    fun playLaserSound() {
+        if (isPlayingAudio) return
+        viewModelScope.launch(Dispatchers.Default) {
+            isPlayingAudio = true
+            try {
+                val sampleRate = 44100
+                val durationS = 0.18f 
+                val numSamples = (durationS * sampleRate).toInt()
+                val sample = DoubleArray(numSamples)
+                val generatedSnd = ShortArray(numSamples)
+
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    // Blaster sound sweep: 1400Hz down to 250Hz
+                    val frequency = 1400.0 - (1150.0 * (t / durationS))
+                    sample[i] = Math.sin(2.0 * Math.PI * frequency * t)
+                    
+                    // Secondary metallic futuristic harmonic
+                    val harmonic = 0.3 * Math.sin(2.0 * Math.PI * (frequency * 1.5) * t)
+                    
+                    // Smooth fade out over last 20% to avoid audio pops
+                    val fade = if (i > numSamples * 0.8) {
+                        ((numSamples - i).toDouble() / (numSamples * 0.2))
+                    } else {
+                        1.0
+                    }
+                    
+                    val blendedWave = (sample[i] + harmonic) / 1.3
+                    generatedSnd[i] = (blendedWave * 32767.0 * fade).toInt().toShort()
+                }
+
+                val audioTrack = android.media.AudioTrack(
+                    android.media.AudioManager.STREAM_MUSIC,
+                    sampleRate,
+                    android.media.AudioFormat.CHANNEL_OUT_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT,
+                    numSamples * 2,
+                    android.media.AudioTrack.MODE_STATIC
+                )
+                audioTrack.write(generatedSnd, 0, numSamples)
+                audioTrack.play()
+                
+                kotlinx.coroutines.delay((durationS * 1000).toLong() + 30)
+                audioTrack.release()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isPlayingAudio = false
+            }
+        }
+    }
+
+    fun fetchPairedBluetoothDevices(context: Context) {
+        _state.update { it.copy(isScanningBluetooth = true) }
+        try {
+            val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+            if (adapter == null) {
+                _state.update {
+                    it.copy(
+                        isScanningBluetooth = false,
+                        statusMessage = "Bluetooth not supported on this device.",
+                        logs = it.logs.toMutableList().apply { add(0, "⚠️ Bluetooth adapter is null.") }
+                    )
+                }
+                return
+            }
+            if (!adapter.isEnabled) {
+                _state.update {
+                    it.copy(
+                        isScanningBluetooth = false,
+                        statusMessage = "Please enable Bluetooth.",
+                        logs = it.logs.toMutableList().apply { add(0, "⚠️ Bluetooth is disabled.") }
+                    )
+                }
+                return
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.BLUETOOTH_CONNECT
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    _state.update {
+                        it.copy(
+                            isScanningBluetooth = false,
+                            statusMessage = "Requires Bluetooth Connect permission."
+                        )
+                    }
+                    return
+                }
+            }
+
+            val pairedDevices = adapter.bondedDevices
+            val list = pairedDevices.map { BtDevice(it.name ?: "Unknown Device", it.address) }
+            _state.update {
+                it.copy(
+                    bluetoothDevices = list,
+                    isScanningBluetooth = false,
+                    logs = it.logs.toMutableList().apply { add(0, "Found ${list.size} paired devices.") }
+                )
+            }
+        } catch (e: Exception) {
+            _state.update {
+                it.copy(
+                    isScanningBluetooth = false,
+                    statusMessage = "Error: ${e.localizedMessage}"
+                )
+            }
+        }
     }
 
     private fun fetchLocalIp() {
@@ -81,6 +222,14 @@ class LaserTagViewModel : ViewModel() {
             }
             _state.update { it.copy(localIp = "127.0.0.1") }
         }
+    }
+
+    fun enterBattle() {
+        _state.update { it.copy(showLobby = false) }
+    }
+
+    fun exitToLobby() {
+        _state.update { it.copy(showLobby = true) }
     }
 
     fun selectCalibrationTab(zone: HitZone) {
@@ -122,6 +271,7 @@ class LaserTagViewModel : ViewModel() {
         disconnect()
         _state.update {
             it.copy(
+                connectionType = ConnectionType.WIFI,
                 networkState = NetworkState.HOSTING,
                 isHost = true,
                 statusMessage = "Hosting on port 8888. Awaiting opponent...",
@@ -148,7 +298,7 @@ class LaserTagViewModel : ViewModel() {
                     // Sync initial health state
                     sendNetworkMessage("SYNC:HP:${_state.value.userHp}")
                     
-                    startListening(socket)
+                    startListening(socket.getInputStream())
                 }
             } catch (e: Exception) {
                 if (_state.value.networkState == NetworkState.HOSTING) {
@@ -163,11 +313,12 @@ class LaserTagViewModel : ViewModel() {
         }
     }
 
-    // Join Battle
+    // Join Battle over Local Wifi TCP
     fun joinGame(targetIp: String) {
         disconnect()
         _state.update {
             it.copy(
+                connectionType = ConnectionType.WIFI,
                 networkState = NetworkState.JOINING,
                 isHost = false,
                 statusMessage = "Connecting to $targetIp:8888...",
@@ -192,7 +343,7 @@ class LaserTagViewModel : ViewModel() {
                 // Sync initial health state
                 sendNetworkMessage("SYNC:HP:${_state.value.userHp}")
 
-                startListening(socket)
+                startListening(socket.getInputStream())
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
@@ -205,11 +356,138 @@ class LaserTagViewModel : ViewModel() {
         }
     }
 
-    private fun startListening(socket: Socket) {
+    // Host Battle via Bluetooth
+    fun hostBluetoothGame(context: Context) {
+        disconnect()
+        _state.update {
+            it.copy(
+                connectionType = ConnectionType.BLUETOOTH,
+                networkState = NetworkState.HOSTING,
+                isHost = true,
+                statusMessage = "Hosting via Bluetooth. Awaiting opponent...",
+                logs = it.logs.toMutableList().apply { add(0, "Started Bluetooth hosting.") }
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+                if (adapter == null) {
+                    throw Exception("Bluetooth is not supported or active on this device.")
+                }
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.BLUETOOTH_CONNECT
+                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        throw Exception("Missing Bluetooth Connect permission.")
+                    }
+                }
+
+                bluetoothServerSocket = adapter.listenUsingRfcommWithServiceRecord("LaserTag", MY_UUID)
+                val socket = bluetoothServerSocket?.accept()
+                if (socket != null) {
+                    bluetoothSocket = socket
+                    activeOutputStream = socket.outputStream
+                    
+                    _state.update {
+                        it.copy(
+                            networkState = NetworkState.CONNECTED,
+                            statusMessage = "Opponent connected via Bluetooth!",
+                            logs = it.logs.toMutableList().apply { add(0, "Bluetooth connection established with opponent!") }
+                        )
+                    }
+
+                    // Sync initial health state
+                    sendNetworkMessage("SYNC:HP:${_state.value.userHp}")
+                    
+                    startListening(socket.inputStream)
+                }
+            } catch (e: Exception) {
+                if (_state.value.networkState == NetworkState.HOSTING) {
+                    _state.update {
+                        it.copy(
+                            networkState = NetworkState.ERROR,
+                            statusMessage = "Bluetooth Host failed: ${e.localizedMessage}"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Join Battle via Bluetooth
+    fun joinBluetoothGame(context: Context, address: String) {
+        disconnect()
+        _state.update {
+            it.copy(
+                connectionType = ConnectionType.BLUETOOTH,
+                networkState = NetworkState.JOINING,
+                isHost = false,
+                statusMessage = "Connecting to Bluetooth Device $address...",
+                logs = it.logs.toMutableList().apply { add(0, "Connecting to BT device address $address") }
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+                if (adapter == null) {
+                    throw Exception("Bluetooth is not supported on this device.")
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.BLUETOOTH_CONNECT
+                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        throw Exception("Missing Bluetooth Connect permission.")
+                    }
+                }
+
+                val remoteDevice = adapter.getRemoteDevice(address)
+                val socket = remoteDevice.createRfcommSocketToServiceRecord(MY_UUID)
+                bluetoothSocket = socket
+                
+                try {
+                    adapter.cancelDiscovery()
+                } catch (e: Exception) {}
+
+                socket.connect()
+                activeOutputStream = socket.outputStream
+
+                _state.update {
+                    it.copy(
+                        networkState = NetworkState.CONNECTED,
+                        statusMessage = "Connected to Bluetooth host!",
+                        logs = it.logs.toMutableList().apply { add(0, "Successfully connected to Bluetooth host $address") }
+                    )
+                }
+
+                // Sync initial health state
+                sendNetworkMessage("SYNC:HP:${_state.value.userHp}")
+
+                startListening(socket.inputStream)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        networkState = NetworkState.ERROR,
+                        statusMessage = "Bluetooth pairing failed: ${e.localizedMessage}",
+                        logs = it.logs.toMutableList().apply { add(0, "BT Connection error: ${e.localizedMessage}") }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startListening(inputStream: java.io.InputStream) {
         readerThreadJob?.cancel()
         readerThreadJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+                val reader = BufferedReader(InputStreamReader(inputStream))
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     processIncomingMessage(line!!)
@@ -241,7 +519,7 @@ class LaserTagViewModel : ViewModel() {
                     _state.update {
                         it.copy(
                             opponentHp = oppHp,
-                            logs = it.logs.toMutableList().apply { add(0, "Opponent HP updated to $oppHp%") }
+                            logs = it.logs.toMutableList().apply { add(0, "Opponent HP synchronized to $oppHp%") }
                         )
                     }
                 }
@@ -279,26 +557,36 @@ class LaserTagViewModel : ViewModel() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+            try {
+                activeOutputStream?.let { out ->
+                    val data = (msg + "\n").toByteArray()
+                    out.write(data)
+                    out.flush()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     // Fire laser!
     fun fireLaser(context: Context) {
+        // ALWAYS play high-quality laser gunshot synthesized sound and haptic vibration feedback instantly!
+        playLaserSound()
+        triggerVibrate(context)
+
         val currZone = _state.value.lockedZone
         val isOpponentConnected = _state.value.networkState == NetworkState.CONNECTED
 
         if (currZone == HitZone.NONE) {
-            // A missed shot!
+            // A missed shot! Include sound/vibe feedback
             _state.update {
                 it.copy(
-                    logs = it.logs.toMutableList().apply { add(0, "💨 Missed shot! Crosshair is idle.") }
+                    logs = it.logs.toMutableList().apply { add(0, "💨 Shot fired! No target locked.") }
                 )
             }
             return
         }
-
-        // We successfully locked on and hit! Provide instant vibration haptic confirmation
-        triggerVibrate(context)
 
         val damage = when (currZone) {
             HitZone.HEAD -> 50
@@ -307,24 +595,19 @@ class LaserTagViewModel : ViewModel() {
             else -> 0
         }
 
+        // REDUCE HP immediately on both clients for a completely lag-free, zero perceived latency multiplayer experience!
         _state.update {
             val updatedLogs = it.logs.toMutableList()
-            updatedLogs.add(0, "🎯 HIT SUCCESSFULLY! You shot opponent's ${currZone.name} to deal -$damage DMG!")
+            updatedLogs.add(0, "🎯 HIT REGISTERED! You shot opponent's ${currZone.name} to deal -$damage DMG!")
             
-            // If offline, simulate opponent health reduction for a smooth interactive mockup play experience!
-            val oppNewHp = if (!isOpponentConnected) {
-                maxOf(0, it.opponentHp - damage)
-            } else {
-                it.opponentHp
-            }
-
+            val oppNewHp = maxOf(0, it.opponentHp - damage)
             it.copy(
                 opponentHp = oppNewHp,
                 logs = updatedLogs
             )
         }
 
-        // If online, transmit hit message to client!
+        // Transmit hit packages to opponent instantly
         if (isOpponentConnected) {
             sendNetworkMessage("HIT:$currZone")
         }
@@ -342,10 +625,10 @@ class LaserTagViewModel : ViewModel() {
 
             if (vibrator != null && vibrator.hasVibrator()) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(220, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrator.vibrate(VibrationEffect.createOneShot(180, VibrationEffect.DEFAULT_AMPLITUDE))
                 } else {
                     @Suppress("DEPRECATION")
-                    vibrator.vibrate(220)
+                    vibrator.vibrate(180)
                 }
             }
         } catch (e: Exception) {
@@ -380,10 +663,19 @@ class LaserTagViewModel : ViewModel() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        try {
+            bluetoothServerSocket?.close()
+            bluetoothSocket?.close()
+            activeOutputStream?.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         printWriter = null
         clientSocket = null
         serverSocket = null
-
+        bluetoothServerSocket = null
+        bluetoothSocket = null
+        activeOutputStream = null
         _state.update {
             it.copy(
                 networkState = NetworkState.DISCONNECTED,

@@ -8,17 +8,23 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -30,6 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -75,175 +83,323 @@ fun LaserTagGameScreen(
             .fillMaxSize()
             .background(Color(0xFF0F1219)) // Deep tactical midnight black background
     ) {
-        if (cameraPermissionState.status.isGranted) {
-            // 1. Camera View covering the screen (HUD backdrop)
-            CameraPreviewAndAnalyzer(
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            // Permission request screen
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .background(Color(0xE6161C2A), RoundedCornerShape(24.dp))
-                        .border(1.dp, Color(0xFFE42E5B).copy(alpha = 0.5f), RoundedCornerShape(24.dp))
-                        .padding(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Videocam,
-                        contentDescription = "Camera Permission Needed",
-                        tint = Color(0xFFE42E5B),
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Camera Permission Required",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "AR Laser Tag detects calibrated armor colors using direct, real-time pixel scanning on your screen center.",
-                        color = Color.LightGray,
-                        textAlign = TextAlign.Center,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = { cameraPermissionState.launchPermissionRequest() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE42E5B)),
-                        modifier = Modifier
-                            .testTag("request_permission_button")
-                            .height(48.dp)
-                    ) {
-                        Text("Grant Camera Access", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // 2. The Laser Crosshair centered precisely
-        if (cameraPermissionState.status.isGranted) {
-            LaserTacticalCrosshair(
-                lockedZone = state.lockedZone,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // 3. Status Action HUD / Quick Log
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 16.dp)
-        ) {
-            // Upper Tier: Health status and Match metadata
-            CombatTopHud(
-                userHp = state.userHp,
-                opponentHp = state.opponentHp,
-                networkState = state.networkState,
-                statusMessage = state.statusMessage,
-                onNetworkMenuOpen = { showNetworkMenu = true },
-                onCalibrationOpen = { showCalibrationMenu = true },
-                onLogsOpen = { showLogsDialog = true },
-                onReset = { viewModel.resetMatch() }
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Lower Tier: Live color trace list, game terminal details, and shooting trigger button to match FPS design
+        if (state.showLobby) {
+            // Modern beautiful game lobby / launch interface designed for Landscape
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .fillMaxSize()
+                    .background(Color(0xFF0F1219))
             ) {
-                // Left hand widgets: Quick stats tracker
-                Column(
+                // Left Pane: Cinematic illustration and Title branding
+                Box(
                     modifier = Modifier
-                        .weight(1.5f)
-                        .background(Color(0xB3111622), RoundedCornerShape(16.dp))
-                        .border(1.dp, Color(0xFF2E6EE4).copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                        .padding(12.dp)
+                        .fillMaxHeight()
+                        .weight(1.2f)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(12.0.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Color(
-                                        android.graphics.Color.HSVToColor(
-                                            floatArrayOf(
-                                                state.liveColor.h,
-                                                state.liveColor.s,
-                                                state.liveColor.v
-                                            )
-                                        )
+                    Image(
+                        painter = painterResource(id = com.example.R.drawable.combat_hero_banner),
+                        contentDescription = "Combat Arena Wallpaper",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp))
+                    )
+                    // Gradient overlay to fade left illustration to dark right controls seamlessly
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color(0xFF0F1219).copy(alpha = 0.6f),
+                                        Color(0xFF0F1219)
                                     )
                                 )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "CENTER PIXEL",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.LightGray,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Hue: ${state.liveColor.h.toInt()}° | Sat: ${(state.liveColor.s * 100).toInt()}% | Val: ${(state.liveColor.v * 100).toInt()}%",
-                        color = Color.Cyan,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
+                            )
                     )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    // Overlay Title Badge
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
+                            .background(Color(0xE61A1D26), RoundedCornerShape(12.dp))
+                            .border(1.dp, Color(0xFF00FFCC).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "BATTLEFIELD LOBBY",
+                            color = Color(0xFF00FFCC),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+
+                // Right Pane: Action configurations and Deploy buttons (making full height available scrollably)
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .weight(1f)
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    // Localized Header
+                    Text(
+                        text = "الساحة القتالية الرقمية",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "AR TACTICAL LASER TAG",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2E6EE4),
+                        letterSpacing = 1.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Tactical Specifications Info
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(1.dp)
-                            .background(Color.White.copy(alpha = 0.1f))
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "Calibrated Active Armor Ranges:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.LightGray
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(top = 4.dp)
+                            .background(Color(0x1F00FFCC), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFF00FFCC).copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .padding(8.dp)
                     ) {
-                        TargetTagIndicator(name = "HEAD", color = hsvToColor(state.headHsv))
-                        TargetTagIndicator(name = "CHEST", color = hsvToColor(state.chestHsv))
-                        TargetTagIndicator(name = "LIMBS", color = hsvToColor(state.limbsHsv))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.FilterCenterFocus,
+                                contentDescription = "Precision Reticle Info",
+                                tint = Color(0xFF00FFCC),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "تم تصغير مربع تحديد الألوان بدقة عالية (4x4 بكسل)",
+                                    fontSize = 10.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Super high precision 4x4 color reticle is now active.",
+                                    fontSize = 9.sp,
+                                    color = Color.LightGray
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Rules Guidance Card (miniaturized for landscape layout viewports)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0x66161C2C)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "⚔️ COMBAT INTEL",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            
+                            BulletIntelRow(
+                                textAr = "صوّب مركز الشاشة نحو الخصم للإقفال التلقائي.",
+                                textEn = "Aim center reticle directly on target armor zones to lock."
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            BulletIntelRow(
+                                textAr = "اضغط على زر الإطلاق الضخم لضرب نقاط حياة الخصم.",
+                                textEn = "Press the trigger button to fire and deal heavy damage."
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Main Action Launcher Button (Deploy!)
+                    Button(
+                        onClick = { viewModel.enterBattle() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE42E5B)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("enter_battle_arena"),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.SportsEsports, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "انطلق إلى المعركة / DEPLOY",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Lobby setup quick access buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showNetworkMenu = true },
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(38.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                        ) {
+                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("ربط الشبكة / Link IP", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { showCalibrationMenu = true },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                        ) {
+                            Icon(Icons.Default.Colorize, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("معايرة الدروع", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
+            }
+        } else {
+            if (cameraPermissionState.status.isGranted) {
+                var currentZoom by remember { mutableStateOf(1f) }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // Right hand Trigger: The giant right thumb SHOOT button which is tactile, reactive, and comfortable
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    ShootTriggerButton(
-                        lockedZone = state.lockedZone,
-                        onFire = { viewModel.fireLaser(context) }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // 1. Camera with smooth gesture-driven pinch zoom
+                    CameraPreviewAndAnalyzer(
+                        viewModel = viewModel,
+                        modifier = Modifier.fillMaxSize(),
+                        onZoomChanged = { currentZoom = it }
                     )
+
+                    // 2. Floating Laser Crosshair target sight
+                    LaserTacticalCrosshair(
+                        lockedZone = state.lockedZone,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Sniper Digital Zoom Scope Indicator Overlay
+                    if (currentZoom > 1.05f) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 100.dp)
+                                .background(Color(0xE6111724), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF00FFCC).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "ZOOM: " + String.format("%.1fx", currentZoom),
+                                color = Color(0xFF00FFCC),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // 3. Compact Minimalist Top HUD (placed on Upper Corners in Landscape)
+                    CombatTopLandscapeHud(
+                        userHp = state.userHp,
+                        opponentHp = state.opponentHp,
+                        networkState = state.networkState,
+                        onNetworkMenuOpen = { showNetworkMenu = true },
+                        onCalibrationOpen = { showCalibrationMenu = true },
+                        onLogsOpen = { showLogsDialog = true },
+                        onExitToLobby = { viewModel.exitToLobby() },
+                        onReset = { viewModel.resetMatch() }
+                    )
+
+                    // 4. Tactical Trigger on bottom-right (perfect right thumb reach)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 24.dp, bottom = 24.dp)
+                    ) {
+                        ShootTriggerButton(
+                            lockedZone = state.lockedZone,
+                            onFire = { viewModel.fireLaser(context) }
+                        )
+                    }
+                }
+            } else {
+                // Permission request screen optimized for landscape UI
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .background(Color(0xE6161C2A), RoundedCornerShape(24.dp))
+                            .border(1.dp, Color(0xFFE42E5B).copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                            .padding(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = "Camera Permission Needed",
+                            tint = Color(0xFFE42E5B),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Camera Permission Required",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "AR Laser Tag detects calibrated armor colors using real-time pixel scanning.",
+                            color = Color.LightGray,
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { cameraPermissionState.launchPermissionRequest() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE42E5B)),
+                            modifier = Modifier
+                                .testTag("request_permission_button")
+                                .height(44.dp)
+                        ) {
+                            Text("Grant Camera Access", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
@@ -305,8 +461,15 @@ fun LaserTagGameScreen(
             NetworkMenuSheet(
                 localIp = state.localIp,
                 networkState = state.networkState,
-                onHost = { viewModel.hostGame() },
-                onJoin = { hostIp -> viewModel.joinGame(hostIp) },
+                connectionType = state.connectionType,
+                bluetoothDevices = state.bluetoothDevices,
+                isScanningBluetooth = state.isScanningBluetooth,
+                onSelectConnectionType = { viewModel.selectConnectionType(it) },
+                onHostWifi = { viewModel.hostGame() },
+                onJoinWifi = { hostIp -> viewModel.joinGame(hostIp) },
+                onHostBluetooth = { viewModel.hostBluetoothGame(context) },
+                onJoinBluetooth = { address -> viewModel.joinBluetoothGame(context, address) },
+                onScanBluetooth = { viewModel.fetchPairedBluetoothDevices(context) },
                 onDisconnect = { viewModel.disconnect() },
                 onDismiss = { showNetworkMenu = false }
             )
@@ -337,6 +500,20 @@ fun LaserTagGameScreen(
                 logs = state.logs,
                 onDismiss = { showLogsDialog = false }
             )
+        }
+    }
+}
+
+@Composable
+fun BulletIntelRow(textAr: String, textEn: String) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(text = "•", color = Color(0xFF00FFCC), fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
+        Column {
+            Text(text = textAr, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = textEn, color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Normal)
         }
     }
 }
@@ -618,14 +795,14 @@ fun LaserTacticalCrosshair(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Fixed ROI scanning reference center overlay box (extremely faint guideline matching a radar aesthetic)
+        // Fixed ROI scanning reference center overlay box (extremely precise center target frame)
         Canvas(
-            modifier = Modifier.size(48.dp)
+            modifier = Modifier.size(12.dp)
         ) {
             // Draw four precise corner brackets outlining the invisible threshold box area
             val s = size.width
-            val len = 10f
-            val strokeWidth = 2f
+            val len = 4f
+            val strokeWidth = 2.5f
 
             // Top-left bracket
             drawLine(activeGlowColor, start = androidx.compose.ui.geometry.Offset(0f, 0f), end = androidx.compose.ui.geometry.Offset(len, 0f), strokeWidth)
@@ -646,7 +823,7 @@ fun LaserTacticalCrosshair(
 
         // Inner absolute center pointer crosshair (+)
         Canvas(
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(12.dp)
         ) {
             val half = size.width / 2
             val stroke = 3f
@@ -671,7 +848,7 @@ fun LaserTacticalCrosshair(
         if (lockedZone != HitZone.NONE) {
             Column(
                 modifier = Modifier
-                    .offset(y = 42.dp)
+                    .offset(y = 28.dp)
                     .background(activeGlowColor.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
@@ -687,12 +864,205 @@ fun LaserTacticalCrosshair(
 }
 
 @Composable
+fun CombatTopLandscapeHud(
+    userHp: Int,
+    opponentHp: Int,
+    networkState: NetworkState,
+    onNetworkMenuOpen: () -> Unit,
+    onCalibrationOpen: () -> Unit,
+    onLogsOpen: () -> Unit,
+    onExitToLobby: () -> Unit,
+    onReset: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0F1219).copy(alpha = 0.85f),
+                        Color.Transparent
+                    )
+                )
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        // Left Column (Your HP - Miniaturized & Minimalist)
+        Column(
+            modifier = Modifier
+                .width(160.dp)
+                .background(Color(0xB3111624), RoundedCornerShape(8.dp))
+                .border(1.dp, Color(0xFF00FFCC).copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🛡️ YOUR HP",
+                    fontSize = 10.sp,
+                    color = Color(0xFF00FFCC),
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "$userHp%",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { userHp / 100f },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = if (userHp > 40) Color(0xFF00FFCC) else Color(0xFFFF3366),
+                trackColor = Color(0xFF222B3E),
+            )
+        }
+
+        // Center Buttons Control Hub (Compact & Floating)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .background(Color(0xCC0F1219), RoundedCornerShape(12.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            // Lobby / Connection Info Quick Access
+            IconButton(
+                onClick = onNetworkMenuOpen,
+                modifier = Modifier.size(28.dp)
+            ) {
+                val netColor = when (networkState) {
+                    NetworkState.CONNECTED -> Color(0xFF00FF2B)
+                    NetworkState.HOSTING, NetworkState.JOINING -> Color(0xFFFFC107)
+                    else -> Color.Gray
+                }
+                Icon(
+                    imageVector = Icons.Default.Wifi,
+                    contentDescription = "Link Wi-Fi",
+                    tint = netColor,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Target calibration
+            IconButton(
+                onClick = onCalibrationOpen,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Colorize,
+                    contentDescription = "Calibrate",
+                    tint = Color.Cyan,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Feed / Logs
+            IconButton(
+                onClick = onLogsOpen,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.List,
+                    contentDescription = "Logs",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Reset Game
+            IconButton(
+                onClick = onReset,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.RestartAlt,
+                    contentDescription = "Reset Match",
+                    tint = Color(0xFFFF5252),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Vertical divider
+            Box(
+                modifier = Modifier
+                    .height(16.dp)
+                    .width(1.dp)
+                    .background(Color.White.copy(alpha = 0.15f))
+            )
+
+            // Return to beautiful battlefield Lobby
+            IconButton(
+                onClick = onExitToLobby,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Logout,
+                    contentDescription = "Lobby",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        // Right Column (Opponent HP - Miniaturized & Minimalist)
+        Column(
+            modifier = Modifier
+                .width(160.dp)
+                .background(Color(0xB3111624), RoundedCornerShape(8.dp))
+                .border(1.dp, Color(0xFFFF3B3B).copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "💥 OPPONENT",
+                    fontSize = 10.sp,
+                    color = Color(0xFFFF3B3B),
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "$opponentHp%",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { opponentHp / 100f },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = Color(0xFFFF3B3B),
+                trackColor = Color(0xFF222B3E),
+            )
+        }
+    }
+}
+
+@Composable
 fun ShootTriggerButton(
     lockedZone: HitZone,
     onFire: () -> Unit
 ) {
     val isLocked = lockedZone != HitZone.NONE
-    val triggerColor = if (isLocked) Color(0xFFFF2B55) else Color(0xFF556075)
+    val triggerColor = if (isLocked) Color(0xFFFF1744) else Color(0x66556075)
+    val glowColor = if (isLocked) Color(0xFFFF1744) else Color.White.copy(alpha = 0.3f)
 
     Button(
         onClick = onFire,
@@ -704,161 +1074,389 @@ fun ShootTriggerButton(
             defaultElevation = 8.dp,
             pressedElevation = 2.dp
         ),
+        contentPadding = PaddingValues(0.dp),
         modifier = Modifier
             .testTag("shoot_trigger_button")
-            .size(96.dp)
-            .border(2.dp, Color.White.copy(alpha = 0.3f), CircleShape)
-            .padding(2.dp)
+            .size(100.dp)
+            .border(3.dp, glowColor, CircleShape)
+            .padding(4.dp)
+            .background(Color.Black.copy(alpha = 0.2f), CircleShape)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Bolt,
-                contentDescription = "Trigger Shot",
-                tint = Color.White,
-                modifier = Modifier.size(34.dp)
-            )
-            Text(
-                text = "FIRE",
-                color = Color.White,
-                fontWeight = FontWeight.Black,
-                fontSize = 11.sp
-            )
+            // Double-concentric circular tactical military crosshair overlay graphics
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawCircle(
+                    color = glowColor.copy(alpha = 0.2f),
+                    radius = size.minDimension / 2f
+                )
+                drawCircle(
+                    color = glowColor.copy(alpha = 0.15f),
+                    radius = size.minDimension / 3f,
+                    style = Stroke(width = 1.5f)
+                )
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.GpsFixed,
+                    contentDescription = "Attack Target Trigger",
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
+                )
+                Text(
+                    text = "FIRE",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp
+                )
+            }
         }
     }
 }
 
-// Dialog to Host / Join games
+// Dialog to Host / Join games via Wifi or Bluetooth
 @Composable
 fun NetworkMenuSheet(
     localIp: String,
     networkState: NetworkState,
-    onHost: () -> Unit,
-    onJoin: (String) -> Unit,
+    connectionType: ConnectionType,
+    bluetoothDevices: List<BtDevice>,
+    isScanningBluetooth: Boolean,
+    onSelectConnectionType: (ConnectionType) -> Unit,
+    onHostWifi: () -> Unit,
+    onJoinWifi: (String) -> Unit,
+    onHostBluetooth: () -> Unit,
+    onJoinBluetooth: (String) -> Unit,
+    onScanBluetooth: () -> Unit,
     onDisconnect: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var hostIpInput by remember { mutableStateOf("") }
+    
+    // Automatically trigger initial scan of bonded BT devices when BT tab is active
+    val context = LocalContext.current
+    LaunchedEffect(connectionType) {
+        if (connectionType == ConnectionType.BLUETOOTH) {
+            onScanBluetooth()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                "📶 Link Battlefield Sockets",
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (connectionType == ConnectionType.WIFI) Icons.Default.Wifi else Icons.Default.Bluetooth,
+                    contentDescription = null,
+                    tint = Color(0xFF00FFCC),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ربط الهواتف / Link Battlefield Sockets",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
         },
         containerColor = Color(0xFF161B29),
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "Sync two phones over local Wi-Fi. Make sure BOTH are on the same local network.",
-                    color = Color.LightGray,
-                    fontSize = 13.sp
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Your IP info
+                // Connection Mode Selector
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF222B3E), RoundedCornerShape(8.dp))
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .background(Color(0xFF0F1219), RoundedCornerShape(8.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    Column {
-                        Text("YOUR DEVICE IP", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                        Text(localIp, fontSize = 16.sp, color = Color.White, fontFamily = FontFamily.Monospace)
-                    }
-                    Button(
-                        onClick = onHost,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFCC)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("host_battle_button")
+                    // WIFI TAB
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (connectionType == ConnectionType.WIFI) Color(0xFF2E6EE4) else Color.Transparent)
+                            .clickable { onSelectConnectionType(ConnectionType.WIFI) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("HOST", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Wi-Fi / Sockets",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    // BLUETOOTH TAB
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (connectionType == ConnectionType.BLUETOOTH) Color(0xFF2E6EE4) else Color.Transparent)
+                            .clickable { onSelectConnectionType(ConnectionType.BLUETOOTH) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Bluetooth",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Connect to opponent IP
-                Text("JOIN CO-OP BATTLE", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = hostIpInput,
-                    onValueChange = { hostIpInput = it },
-                    placeholder = { Text("Enter Host's IP Address (e.g. 192.168.1.X)", fontSize = 13.sp, color = Color.Gray) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onAny = {
-                            if (hostIpInput.trim().isNotEmpty()) {
-                                onJoin(hostIpInput.trim())
-                            }
-                        }
-                    ),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF2E6EE4),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                        focusedContainerColor = Color(0xFF1E2638),
-                        unfocusedContainerColor = Color(0xFF121824)
-                    ),
-                    shape = RoundedCornerShape(8.dp),
+                // Connection State Badge
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("join_ip_input")
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = {
-                        if (hostIpInput.trim().isNotEmpty()) {
-                            onJoin(hostIpInput.trim())
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("join_button")
-                        .height(44.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E6EE4))
+                        .background(
+                            when (networkState) {
+                                NetworkState.CONNECTED -> Color(0x3300FFCC)
+                                NetworkState.HOSTING, NetworkState.JOINING -> Color(0x33FFCC00)
+                                NetworkState.ERROR -> Color(0x33FF3366)
+                                else -> Color.White.copy(alpha = 0.1f)
+                            },
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("CONNECT TO HOST", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(
+                        text = "STATUS: ${networkState.name}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        color = when (networkState) {
+                            NetworkState.CONNECTED -> Color(0xFF00FFCC)
+                            NetworkState.HOSTING, NetworkState.JOINING -> Color(0xFFFFCC00)
+                            NetworkState.ERROR -> Color(0xFFFF3366)
+                            else -> Color.LightGray
+                        },
+                        letterSpacing = 1.sp
+                    )
                 }
 
-                if (networkState == NetworkState.CONNECTED) {
-                    Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (connectionType == ConnectionType.WIFI) {
+                    // WI-FI METHOD LAYOUT
+                    Text(
+                        text = "Sync two phones over local Wi-Fi. Make sure BOTH are on the same local network.",
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Host Server Box
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF222B3E), RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("YOUR WIFI IP", fontSize = 9.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                            Text(localIp, fontSize = 14.sp, color = Color.White, fontFamily = FontFamily.Monospace)
+                        }
+                        Button(
+                            onClick = onHostWifi,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFCC)),
+                            shape = RoundedCornerShape(6.dp),
+                            enabled = networkState == NetworkState.DISCONNECTED || networkState == NetworkState.ERROR,
+                            modifier = Modifier.testTag("host_battle_button")
+                        ) {
+                            Text("HOST GAME", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Connect client
+                    Text("JOIN BATTLEFIELD", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedTextField(
+                        value = hostIpInput,
+                        onValueChange = { hostIpInput = it },
+                        placeholder = { Text("Enter Host's IP (e.g. 192.168.1.X)", fontSize = 12.sp, color = Color.Gray) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onAny = {
+                                if (hostIpInput.trim().isNotEmpty()) {
+                                    onJoinWifi(hostIpInput.trim())
+                                }
+                            }
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF2E6EE4),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                            focusedContainerColor = Color(0xFF1E2638),
+                            unfocusedContainerColor = Color(0xFF121824)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = networkState == NetworkState.DISCONNECTED || networkState == NetworkState.ERROR,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("join_ip_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Button(
                         onClick = {
-                            onDisconnect()
-                            onDismiss()
+                            if (hostIpInput.trim().isNotEmpty()) {
+                                onJoinWifi(hostIpInput.trim())
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3366))
+                        enabled = (networkState == NetworkState.DISCONNECTED || networkState == NetworkState.ERROR) && hostIpInput.trim().isNotEmpty(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("join_button")
+                            .height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E6EE4))
                     ) {
-                        Text("BREAK LINK / DISCONNECT", fontWeight = FontWeight.Bold)
+                        Text("CONNECT TO IP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                } else {
+                    // BLUETOOTH METHOD LAYOUT
+                    Text(
+                        text = "Play outdoors without setup routers! One player hosts, and the other selects their name from the paired list below.",
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF222B3E), RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("BLUETOOTH LINK", fontSize = 9.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                            Text("Create Server Socket", fontSize = 12.sp, color = Color.White)
+                        }
+                        Button(
+                            onClick = onHostBluetooth,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFCC)),
+                            shape = RoundedCornerShape(6.dp),
+                            enabled = networkState == NetworkState.DISCONNECTED || networkState == NetworkState.ERROR,
+                            modifier = Modifier.testTag("host_bluetooth_button")
+                        ) {
+                            Text("HOST (BT)", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("PAIRED DEVICES (" + bluetoothDevices.size + ")", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = onScanBluetooth) {
+                            Text(if (isScanningBluetooth) "RETRYING..." else "REFRESH", fontSize = 10.sp, color = Color(0xFF00FFCC))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    if (bluetoothDevices.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "No paired Bluetooth devices found.\nEnable Bluetooth & pair in Android System Settings first.",
+                                fontSize = 11.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            bluetoothDevices.forEach { device ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF1E2638), RoundedCornerShape(8.dp))
+                                        .clickable(enabled = networkState == NetworkState.DISCONNECTED || networkState == NetworkState.ERROR) {
+                                            onJoinBluetooth(device.address)
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(device.name, fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(device.address, fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Bluetooth,
+                                        contentDescription = "Sync Pair",
+                                        tint = Color(0xFF2E6EE4),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (networkState == NetworkState.CONNECTED || networkState == NetworkState.HOSTING || networkState == NetworkState.JOINING) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = onDisconnect,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3366)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("قطع الاتصال / DISCONNECT TARGET", fontSize = 12.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("CLOSE", color = Color.LightGray)
+                Text("إغلاق / CLOSE", color = Color.LightGray, fontWeight = FontWeight.Bold)
             }
         }
     )
@@ -1098,64 +1696,107 @@ fun TacticalLogsDialog(
     )
 }
 
-// Setup Camera Preview AND Real-time Color Analysis Bindings
+// Setup Camera Preview AND Real-time Color Analysis Bindings with Pinch To Zoom Support
 @Composable
 fun CameraPreviewAndAnalyzer(
     viewModel: LaserTagViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onZoomChanged: (Float) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    
+    // Hold reference to the bound camera instance for dynamic zoom adjustments
+    val cameraRef = remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
+    var scaleFactor by remember { mutableStateOf(1f) }
 
-    AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx).apply {
-                scaleType = PreviewView.ScaleType.FILL_CENTER
-            }
-            val executor = ContextCompat.getMainExecutor(ctx)
-
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
-
-                // 1. Live Preview layer
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-
-                // 2. Real-time background pixel-level analyzer
-                val imageAnalysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                    .also {
-                        it.setAnalyzer(
-                            executor,
-                            ColorAnalyzer(
-                                onTargetLocked = { zone -> viewModel.updateLockedZone(zone) },
-                                onRoiColorUpdated = { color -> viewModel.updateLiveColor(color) },
-                                targetHeadHsv = { viewModel.state.value.headHsv },
-                                targetChestHsv = { viewModel.state.value.chestHsv },
-                                targetLimbsHsv = { viewModel.state.value.limbsHsv }
-                            )
-                        )
-                    }
-
-                try {
-                    // Unbind everything and bind new preview/analyzer bindings
+    // Cleanly unbind everything when this composable leaves the composition hierarchy
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            try {
+                if (cameraProviderFuture.isDone) {
+                    val cameraProvider = cameraProviderFuture.get()
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        imageAnalysis
-                    )
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
-            }, executor)
-            previewView
-        },
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    Box(
         modifier = modifier
-    )
+            .pointerInput(Unit) {
+                detectTransformGestures { _, _, zoomAmount, _ ->
+                    val cameraInstance = cameraRef.value
+                    if (cameraInstance != null) {
+                        val zoomState = cameraInstance.cameraInfo.zoomState.value
+                        val currentZoom = zoomState?.zoomRatio ?: 1f
+                        val minZoom = zoomState?.minZoomRatio ?: 1f
+                        val maxZoom = zoomState?.maxZoomRatio ?: 6.0f
+                        
+                        val nextZoom = (currentZoom * zoomAmount).coerceIn(minZoom, maxZoom)
+                        cameraInstance.cameraControl.setZoomRatio(nextZoom)
+                        scaleFactor = nextZoom
+                        onZoomChanged(nextZoom)
+                    }
+                }
+            }
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                val previewView = PreviewView(ctx).apply {
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                }
+                val executor = ContextCompat.getMainExecutor(ctx)
+
+                cameraProviderFuture.addListener({
+                    val cameraProvider = cameraProviderFuture.get()
+
+                    // Ensure camera permission is actively granted before trying to bind the camera lifecycles
+                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        // 1. Live Preview layer
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
+
+                        // 2. Real-time background pixel-level analyzer
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+                            .also {
+                                it.setAnalyzer(
+                                    executor,
+                                    ColorAnalyzer(
+                                        onTargetLocked = { zone -> viewModel.updateLockedZone(zone) },
+                                        onRoiColorUpdated = { color -> viewModel.updateLiveColor(color) },
+                                        targetHeadHsv = { viewModel.state.value.headHsv },
+                                        targetChestHsv = { viewModel.state.value.chestHsv },
+                                        targetLimbsHsv = { viewModel.state.value.limbsHsv }
+                                    )
+                                )
+                            }
+
+                        try {
+                            // Unbind everything and bind new preview/analyzer bindings
+                            cameraProvider.unbindAll()
+                            val cam = cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                preview,
+                                imageAnalysis
+                            )
+                            cameraRef.value = cam
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }, executor)
+                previewView
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }

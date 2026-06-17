@@ -50,8 +50,8 @@ class ColorAnalyzer(
             val uvRowStride = uPlane.rowStride
             val uvPixelStride = uPlane.pixelStride
 
-            // Define small fixed ROI size: 16x16 pixels (perfect for center scanning)
-            val roiSize = 16
+            // Define small fixed ROI size: 4x4 pixels (extremely precise for center scanning)
+            val roiSize = 4
             val startX = (width - roiSize) / 2
             val startY = (height - roiSize) / 2
 
