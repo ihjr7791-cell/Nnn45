@@ -331,10 +331,12 @@ fun LaserTagGameScreen(
                     }
 
                     // 3. Compact Minimalist Top HUD (placed on Upper Corners in Landscape)
+                    val isMatchActive = state.userHp > 0 && state.opponentHp > 0
                     CombatTopLandscapeHud(
                         userHp = state.userHp,
                         opponentHp = state.opponentHp,
                         networkState = state.networkState,
+                        isMatchActive = isMatchActive,
                         onNetworkMenuOpen = { showNetworkMenu = true },
                         onCalibrationOpen = { showCalibrationMenu = true },
                         onLogsOpen = { showLogsDialog = true },
@@ -524,6 +526,7 @@ fun CombatTopHud(
     opponentHp: Int,
     networkState: NetworkState,
     statusMessage: String,
+    isMatchActive: Boolean,
     onNetworkMenuOpen: () -> Unit,
     onCalibrationOpen: () -> Unit,
     onLogsOpen: () -> Unit,
@@ -687,19 +690,21 @@ fun CombatTopHud(
             // Quick Menu Group buttons for tactical access
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // Calibration Setup
-                IconButton(
-                    onClick = onCalibrationOpen,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color(0x99131A26), RoundedCornerShape(8.dp))
-                        .border(1.dp, Color.Cyan.copy(alpha = 0.2f), RoundedCornerShape(8.dp)),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Colorize,
-                        contentDescription = "Configure Targets",
-                        tint = Color.Cyan,
-                        modifier = Modifier.size(18.dp)
-                    )
+                if (!isMatchActive) {
+                    IconButton(
+                        onClick = onCalibrationOpen,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color(0x99131A26), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.Cyan.copy(alpha = 0.2f), RoundedCornerShape(8.dp)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Colorize,
+                            contentDescription = "Configure Targets",
+                            tint = Color.Cyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 // Match Logs Feed
@@ -868,6 +873,7 @@ fun CombatTopLandscapeHud(
     userHp: Int,
     opponentHp: Int,
     networkState: NetworkState,
+    isMatchActive: Boolean,
     onNetworkMenuOpen: () -> Unit,
     onCalibrationOpen: () -> Unit,
     onLogsOpen: () -> Unit,
@@ -954,17 +960,19 @@ fun CombatTopLandscapeHud(
                 )
             }
 
-            // Target calibration
-            IconButton(
-                onClick = onCalibrationOpen,
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Colorize,
-                    contentDescription = "Calibrate",
-                    tint = Color.Cyan,
-                    modifier = Modifier.size(16.dp)
-                )
+            // Target calibration (Only show if match is NOT active - anti-cheat enforcement)
+            if (!isMatchActive) {
+                IconButton(
+                    onClick = onCalibrationOpen,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Colorize,
+                        contentDescription = "Calibrate",
+                        tint = Color.Cyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
 
             // Feed / Logs
@@ -1491,7 +1499,9 @@ fun CalibrationPanelSheet(
         containerColor = Color(0xFF161B29),
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
             ) {
                 Text(
                     text = "Aims camera at opponent's armor. Verify color parameters below, then click CAPTURE.",
@@ -1579,7 +1589,32 @@ fun CalibrationPanelSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Capture Color Button prominently placed right beneath the Live preview box!
+                Button(
+                    onClick = {
+                        onCapture()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("capture_color_button")
+                        .height(44.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFCC))
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "CAPTURE COLOR",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Target calibrated values
                 Column(
@@ -1594,29 +1629,6 @@ fun CalibrationPanelSheet(
                     CalibrationRow(label = "HEAD TARGET (50 DMG)", savedColor = headColor)
                     CalibrationRow(label = "CHEST TARGET (25 DMG)", savedColor = chestColor)
                     CalibrationRow(label = "LIMBS TARGET (10 DMG)", savedColor = limbsColor)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = {
-                        onCapture()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("capture_color_button")
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFCC))
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "SAVE LIVE COLOR TO ${currentTab.name}",
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
         },
