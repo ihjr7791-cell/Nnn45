@@ -298,11 +298,13 @@ fun LaserTagGameScreen(
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     // 1. Camera with smooth gesture-driven pinch zoom
-                    CameraPreviewAndAnalyzer(
-                        viewModel = viewModel,
-                        modifier = Modifier.fillMaxSize(),
-                        onZoomChanged = { currentZoom = it }
-                    )
+                    key(showCalibrationMenu) {
+                        CameraPreviewAndAnalyzer(
+                            viewModel = viewModel,
+                            modifier = Modifier.fillMaxSize(),
+                            onZoomChanged = { currentZoom = it }
+                        )
+                    }
 
                     // 2. Floating Laser Crosshair target sight
                     LaserTacticalCrosshair(
@@ -491,6 +493,7 @@ fun LaserTagGameScreen(
                 chestColor = hsvToColor(state.chestHsv),
                 limbsColor = hsvToColor(state.limbsHsv),
                 onSelectTab = { viewModel.selectCalibrationTab(it) },
+                onLiveColorUpdated = { viewModel.updateLiveColor(it) },
                 onCapture = { viewModel.captureCurrentColorForTab() },
                 onDismiss = { showCalibrationMenu = false }
             )
@@ -1484,9 +1487,27 @@ fun CalibrationPanelSheet(
     chestColor: Color,
     limbsColor: Color,
     onSelectTab: (HitZone) -> Unit,
+    onLiveColorUpdated: (RoiColorData) -> Unit,
     onCapture: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            try {
+                if (cameraProviderFuture.isDone) {
+                    val cameraProvider = cameraProviderFuture.get()
+                    cameraProvider.unbindAll()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -1509,6 +1530,88 @@ fun CalibrationPanelSheet(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
+
+                // 1. Mini Camera Preview Box (The Viewport with Center Crosshair)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.5.dp, Color(0xFF00FFCC).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            val previewView = PreviewView(ctx).apply {
+                                scaleType = PreviewView.ScaleType.FILL_CENTER
+                            }
+                            val executor = ContextCompat.getMainExecutor(ctx)
+                            
+                            cameraProviderFuture.addListener({
+                                try {
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                        val preview = Preview.Builder().build().also {
+                                            it.setSurfaceProvider(previewView.surfaceProvider)
+                                        }
+                                        
+                                        val imageAnalysis = ImageAnalysis.Builder()
+                                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                            .build()
+                                            .also {
+                                                it.setAnalyzer(
+                                                    executor,
+                                                    ColorAnalyzer(
+                                                        onTargetLocked = {},
+                                                        onRoiColorUpdated = { color -> onLiveColorUpdated(color) },
+                                                        targetHeadHsv = { null },
+                                                        targetChestHsv = { null },
+                                                        targetLimbsHsv = { null }
+                                                    )
+                                                )
+                                            }
+                                        
+                                        cameraProvider.unbindAll()
+                                        cameraProvider.bindToLifecycle(
+                                            lifecycleOwner,
+                                            CameraSelector.DEFAULT_BACK_CAMERA,
+                                            preview,
+                                            imageAnalysis
+                                        )
+                                    }
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }, executor)
+                            previewView
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    
+                    // Fixed crosshair (+) overlay in the center of the viewport
+                    Box(
+                        modifier = Modifier.size(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Horizontal crosshair line
+                        Box(
+                            modifier = Modifier
+                                .width(20.dp)
+                                .height(2.dp)
+                                .background(Color(0xFF00FFCC))
+                        )
+                        // Vertical crosshair line
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(20.dp)
+                                .background(Color(0xFF00FFCC))
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Tab Selectors
                 Row(
