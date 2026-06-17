@@ -1,0 +1,6 @@
+{
+  "name": "AR Laser Tag",
+  "description": "Real-time color-based AR laser tag shooter using pixel-level HSV color thresholding and Wi-Fi Host/Join multiplayer sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
