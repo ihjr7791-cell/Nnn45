@@ -285,6 +285,7 @@ class LaserTagViewModel : ViewModel() {
                 val socket = serverSocket?.accept()
                 if (socket != null) {
                     clientSocket = socket
+                    activeOutputStream = socket.getOutputStream()
                     printWriter = PrintWriter(socket.getOutputStream(), true)
                     
                     _state.update {
@@ -330,6 +331,7 @@ class LaserTagViewModel : ViewModel() {
             try {
                 val socket = Socket(targetIp, 8888)
                 clientSocket = socket
+                activeOutputStream = socket.getOutputStream()
                 printWriter = PrintWriter(socket.getOutputStream(), true)
 
                 _state.update {
@@ -502,6 +504,12 @@ class LaserTagViewModel : ViewModel() {
     private fun processIncomingMessage(msg: String) {
         viewModelScope.launch(Dispatchers.Main) {
             when {
+                // Support both new JSON payload format and legacy hit format
+                msg.contains("take_damage") -> {
+                    val match = Regex("""["']amount["']\s*:\s*(\d+)""").find(msg)
+                    val amount = match?.groupValues?.get(1)?.toIntOrNull() ?: 25
+                    applyDamageAndVibrate(amount)
+                }
                 msg.startsWith("HIT:HEAD") -> {
                     // We were hit in the head!
                     applyDamageAndVibrate(50)
@@ -553,15 +561,18 @@ class LaserTagViewModel : ViewModel() {
     private fun sendNetworkMessage(msg: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                printWriter?.println(msg)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-            try {
-                activeOutputStream?.let { out ->
-                    val data = (msg + "\n").toByteArray()
-                    out.write(data)
-                    out.flush()
+                // Write exactly once using the active channel to avoid duplicate hits on the opponent's screen
+                if (_state.value.connectionType == ConnectionType.BLUETOOTH || printWriter == null) {
+                    activeOutputStream?.let { out ->
+                        val data = (msg + "\n").toByteArray(Charsets.UTF_8)
+                        out.write(data)
+                        out.flush()
+                    }
+                } else {
+                    printWriter?.let { writer ->
+                        writer.println(msg)
+                        writer.flush()
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -607,9 +618,10 @@ class LaserTagViewModel : ViewModel() {
             )
         }
 
-        // Transmit hit packages to opponent instantly
+        // Transmit hit packages to opponent instantly via the JSON payload format
         if (isOpponentConnected) {
-            sendNetworkMessage("HIT:$currZone")
+            val payload = """{"event": "take_damage", "amount": $damage}"""
+            sendNetworkMessage(payload)
         }
     }
 
